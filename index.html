@@ -71,7 +71,7 @@ function detectProduk(topik){
 async function callGemini(apiKey,systemPrompt,userPrompt,onChunk){
   if(!apiKey||apiKey.trim()==="")
     throw new Error("API Key belum dikonfigurasi. Silakan isi HARDCODED_API_KEY di kode.");
-  const endpoint=`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${apiKey.trim()}`;
+  const endpoint=`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=${apiKey.trim()}`;
   const resp=await fetch(endpoint,{
     method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({
