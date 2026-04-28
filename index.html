@@ -475,7 +475,6 @@ function ResultPanel({result,mode,rasio}){
 }
 
 
-
 // ── EDU HEALTH FORM ──
 function EduHealthForm({apiKey}){
   const [form,setForm]=useState({
@@ -689,7 +688,6 @@ function App(){
           </p>
         </div>
 
-
         {/* Mode Cards */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:32}}>
           {[
@@ -735,7 +733,7 @@ function App(){
           ))}
         </div>
 
-        {/* Saran Fitur Banner */}
+        {/* Fitur Baru Banner */}
         <div style={{background:"linear-gradient(135deg,rgba(64,128,255,.06),rgba(160,64,255,.06))",border:"1px solid rgba(100,100,255,.15)",borderRadius:14,padding:"16px 20px"}}>
           <div style={{color:"#7080c0",fontWeight:700,fontSize:13,marginBottom:10}}>✨ Fitur Baru di v3</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -772,7 +770,6 @@ function App(){
     </div>
   );
 }
-
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
