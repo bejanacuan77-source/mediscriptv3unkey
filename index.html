@@ -149,7 +149,7 @@ function Chip({active,onClick,children,color="#00e5a0",size="normal"}){
 }
 
 function Toggle({value,onChange,color}){
-  return <div onClick={()=>onChange(!value)} style={{width:46,height:26,borderRadius:13,background:value?color:"#1a1a3e",position:"relative",transition:"background .3s",flexShrink:0,cursor:"pointer",boxShadow:value?`0 0 12px ${color}60`:""inset 0 1px 3px rgba(0,0,0,.5)""}}>
+  return <div onClick={()=>onChange(!value)} style={{width:46,height:26,borderRadius:13,background:value?color:"#1a1a3e",position:"relative",transition:"background .3s",flexShrink:0,cursor:"pointer",boxShadow:value?`0 0 12px ${color}60`:"inset 0 1px 3px rgba(0,0,0,.5)"}}>
     <div style={{width:20,height:20,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:value?23:3,transition:"left .3s",boxShadow:"0 1px 4px rgba(0,0,0,.4)"}}/>
   </div>;
 }
@@ -193,7 +193,7 @@ function SoftSellBlock({form,setForm,color,topikKey}){
     });
   };
   const isOn=form.softSelling;
-  return <div style={{background:"linear-gradient(135deg,#0f0f28,#0c0c22)",border:`1px solid ${isOn?color+"40":"#1e1e48"}`,borderRadius:16,padding:20,transition:"all .3s",boxShadow:isOn?`0 0 20px ${color}12`:""inset 0 1px 0 rgba(255,255,255,.03)""}}>
+  return <div style={{background:"linear-gradient(135deg,#0f0f28,#0c0c22)",border:`1px solid ${isOn?color+"40":"#1e1e48"}`,borderRadius:16,padding:20,transition:"all .3s",boxShadow:isOn?`0 0 20px ${color}12`:"inset 0 1px 0 rgba(255,255,255,.03)"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer"}} onClick={()=>handleToggle(!isOn)}>
         <Toggle value={isOn} onChange={handleToggle} color={color}/>
