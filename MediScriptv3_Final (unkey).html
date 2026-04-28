@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MediScript AI v3</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#05050f;font-family:'DM Sans',system-ui,sans-serif;color:#e2e2ff;min-height:100vh;}
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:#0a0a1a;}
+::-webkit-scrollbar-thumb{background:#2a2a5a;border-radius:3px;}
+input[type=range]{-webkit-appearance:none;height:4px;border-radius:2px;background:#1e1e40;outline:none;width:100%;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;cursor:pointer;}
+select option{background:#0c0c22;color:#e2e2ff;}
+textarea{min-height:70px;}
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
+@keyframes gradientShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+.fadein{animation:fadeIn .4s ease forwards;}
+.shimmer{background:linear-gradient(90deg,#10102a 25%,#1e1e40 50%,#10102a 75%);background-size:800px 100%;animation:shimmer 1.5s infinite linear;}
+.hero-gradient{background:linear-gradient(270deg,#00e5a0,#4080ff,#a060ff,#00e5a0);background-size:400% 400%;animation:gradientShift 8s ease infinite;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useRef,useEffect,useCallback}=React;
+
+// ── API KEY (isi di sini oleh developer) ──
+const HARDCODED_API_KEY="";
+
+// ── IMAGE URL ──
+function getImageUrl(prompt,rasio,seed){
+  const w=rasio==="9:16"?576:1024,h=rasio==="9:16"?1024:576;
+  const s=seed||Math.floor(Math.random()*99999);
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&seed=${s}&nologo=true&enhance=true`;
+}
+
+// ── PRODUK DATABASE ──
+const PRODUK_DB={
+  "diabetes":{nama:"HerbalGluco Plus",deskripsi:"Suplemen herbal ekstrak pare & kayu manis untuk kadar gula darah normal"},
+  "gula":{nama:"HerbalGluco Plus",deskripsi:"Suplemen herbal ekstrak pare & kayu manis untuk kadar gula darah normal"},
+  "kolesterol":{nama:"OmegaHerbal Pro",deskripsi:"Omega-3 premium + ekstrak bawang putih untuk kolesterol sehat"},
+  "hipertensi":{nama:"TensiHerbal Care",deskripsi:"Ekstrak seledri & daun salam untuk tekanan darah tetap normal"},
+  "darah tinggi":{nama:"TensiHerbal Care",deskripsi:"Ekstrak seledri & daun salam untuk tekanan darah normal"},
+  "jantung":{nama:"CardioHerbal Plus",deskripsi:"Hawthorn, CoQ10 & bawang putih untuk kesehatan jantung optimal"},
+  "maag":{nama:"GastroHerbal Shield",deskripsi:"Kunyit, jahe & licorice untuk meredakan gejala maag & asam lambung"},
+  "gerd":{nama:"GastroHerbal Shield",deskripsi:"Kunyit, jahe & licorice untuk asam lambung normal"},
+  "asam urat":{nama:"UricHerbal Clear",deskripsi:"Tempuyung & kumis kucing untuk kadar asam urat normal"},
+  "obesitas":{nama:"SlimHerbal Pro",deskripsi:"Green tea, garcinia cambogia & L-carnitine untuk diet sehat"},
+  "imun":{nama:"ImmunoHerbal Boost",deskripsi:"Vitamin C, zinc & echinacea untuk daya tahan tubuh optimal"},
+  "liver":{nama:"HepatiHerbal Guard",deskripsi:"Temulawak, milk thistle & silymarin untuk fungsi hati sehat"},
+  "hati":{nama:"HepatiHerbal Guard",deskripsi:"Temulawak, milk thistle & silymarin untuk fungsi hati sehat"},
+  "sendi":{nama:"JointHerbal Flex",deskripsi:"Glucosamine, chondroitin & jahe untuk kesehatan sendi & tulang"},
+  "karang gigi":{nama:"DentalHerbal Fresh",deskripsi:"Siwak, mint & tea tree oil untuk gigi & gusi sehat"},
+  "ginjal":{nama:"RenalHerbal Clear",deskripsi:"Kumis kucing & meniran untuk kesehatan ginjal optimal"},
+};
+function detectProduk(topik){
+  const l=topik.toLowerCase();
+  for(const[k,v]of Object.entries(PRODUK_DB))if(l.includes(k))return v;
+  return null;
+}
+
+// ── GEMINI API ──
+async function callGemini(apiKey,systemPrompt,userPrompt,onChunk){
+  if(!apiKey||apiKey.trim()==="")
+    throw new Error("API Key belum dikonfigurasi. Silakan isi HARDCODED_API_KEY di kode.");
+  const endpoint=`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${apiKey.trim()}`;
+  const resp=await fetch(endpoint,{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      systemInstruction:{parts:[{text:systemPrompt}]},
+      contents:[{role:"user",parts:[{text:userPrompt}]}],
+      generationConfig:{maxOutputTokens:4000,temperature:0.85,topP:0.95}
+    })
+  });
+  if(!resp.ok){const e=await resp.text();throw new Error(`Gemini API Error ${resp.status}: ${e.slice(0,200)}`);}
+  const reader=resp.body.getReader(),dec=new TextDecoder();
+  let full="";
+  while(true){
+    const{done,value}=await reader.read();if(done)break;
+    for(const line of dec.decode(value).split("\n")){
+      if(line.startsWith("data: ")){
+        try{const d=JSON.parse(line.slice(6));const t=d?.candidates?.[0]?.content?.parts?.[0]?.text;if(t){full+=t;onChunk(full);}}catch{}
+      }
+    }
+  }
+  return full;
+}
+
+function parseResult(raw){
+  try{const clean=raw.replace(/```json\s*/g,"").replace(/```\s*/g,"").trim();const m=clean.match(/\{[\s\S]*\}/);if(m)return JSON.parse(m[0]);}catch{}
+  return null;
+}
+
+// ── PROMPT BUILDERS ──
+function buildEduPrompt(form){
+  const rasioTxt=form.rasio==="9:16"?"vertikal 9:16 (TikTok/Reels/Shorts) portrait":"horizontal 16:9 (YouTube/LinkedIn) landscape";
+  const ssBlock=form.softSelling
+    ?`\nSOFT SELLING AKTIF:\n- Produk: ${form.deskripsiProduk||"Produk herbal kesehatan"}\n- Penempatan: ${form.penempatanProduk}\n- Masukkan produk di 2 scene terakhir secara natural\n- Ratio narasi: ${form.focusRatio}% edukasi / ${100-form.focusRatio}% produk`
+    :"\n- Mode: Murni edukasi (tanpa soft selling)";
+  return{
+    system:`Kamu adalah scriptwriter profesional konten edukasi kesehatan video pendek viral. Buat script yang akurat secara medis, menarik, dan sesuai platform. Output HANYA JSON valid. Tidak ada teks di luar JSON. Tidak ada markdown code block.`,
+    user:`Buat script video edukasi kesehatan:\nTOPIK: ${form.namaPenyakit}\nTIPE VISUAL: ${form.tipeVisual}\nLINGKUNGAN: ${form.lingkungan||"Studio medis modern"}\nNADA: ${form.nadaEdukasi}\nTARGET AUDIENS: ${form.targetAudiens}\nBAHASA: ${form.bahasa}\nDURASI: ${form.durasi} detik\nNARATOR: ${form.narator}\nPLATFORM: ${form.platform}\nRASIO VIDEO: ${rasioTxt}\nKONTEKS: ${form.konteksTambahan||"5W 1H — penyebab, gejala, pencegahan, penanganan"}${ssBlock}\n\nOutput JSON:\n{\n  "judul": "Judul konten viral menarik",\n  "hook": "Kalimat pembuka 3 detik yang bikin stop scrolling",\n  "scenes": [\n    {\n      "scene_number": 1,\n      "durasi_detik": 5,\n      "narasi": "Teks yang dibacakan narator",\n      "visual_description": "Deskripsi visual/animasi medis yang tampil",\n      "teks_overlay": "Teks pendek di layar (max 10 kata)",\n      "i2v_prompt": "Prompt bahasa Inggris sangat detail untuk AI video/image generator. Hyper-realistic, cinematic, professional medical visual, ${form.rasio==="9:16"?"vertical 9:16 portrait framing":"horizontal 16:9 landscape framing"}, 4K quality, dramatic lighting"\n    }\n  ],\n  "cta": "Call to action penutup yang mengajak penonton",\n  "hashtags": ["#tag1","#tag2","#tag3","#tag4","#tag5"],\n  "caption": "Caption lengkap dan menarik untuk posting di ${form.platform}"\n}`
+  };
+}
+
+function buildObjPrompt(form){
+  const rasioTxt=form.rasio==="9:16"?"vertikal 9:16 portrait":"horizontal 16:9 landscape";
+  const ssBlock=form.softSelling
+    ?`\nSOFT SELLING di scene akhir:\n- Produk: ${form.deskripsiProduk||"Produk kesehatan"}\n- Penempatan: ${form.penempatanProduk}`
+    :"\n- Tanpa soft selling";
+  return{
+    system:`Kamu adalah kreator konten viral Object Talk bergaya @brainhazards. Buat script dramatis dengan visual 3D sinematik yang membangun suspense scene per scene. Output HANYA JSON valid. Tidak ada teks di luar JSON.`,
+    user:`Buat Object Talk script:\nTOPIK: ${form.topik}\nHOOK STYLE: ${form.hookStyle}\nVISUAL 3D: ${form.tipeVisual3D}\nNADA: ${form.nada}\nBAHASA: ${form.bahasa}\nWARNA TEKS: ${form.warnaTeks}\nJUMLAH SCENE: ${form.jumlahScene}\nPLATFORM: ${form.platform}\nRASIO: ${rasioTxt}${ssBlock}\n\nOutput JSON:\n{\n  "judul": "Judul provokatif pakai tanda kutip dramatis",\n  "hook_teks": "Hook pembuka — mengejutkan, max 10 kata",\n  "scenes": [\n    {\n      "scene_number": 1,\n      "durasi_detik": 3,\n      "teks_overlay": "Kalimat pendek dramatis max 10 kata",\n      "narasi_vo": "Narasi yang dibacakan voice over",\n      "visual_3d": "Deskripsi visual 3D sinematik yang tampil",\n      "i2v_prompt": "Prompt Inggris hyper-detailed untuk AI image/video generator. Cinematic 3D medical animation, ultra-realistic, dramatic lighting, ${form.rasio==="9:16"?"vertical 9:16 portrait":"horizontal 16:9 landscape"}, 4K, dark atmospheric background, glowing biological elements"\n    }\n  ],\n  "pesan_inti": "Pesan utama/resolusi mengejutkan 1-2 kalimat",\n  "caption": "Caption Instagram/TikTok hook kuat di baris pertama",\n  "hashtags": ["#tag1","#tag2","#tag3","#tag4","#tag5"]\n}`
+  };
+}
+
+// ── BASE STYLES ──
+const S={
+  card:{background:"linear-gradient(135deg,#0f0f28,#0c0c22)",border:"1px solid #1e1e48",borderRadius:16,padding:22},
+  label:{color:"#6060a0",fontSize:11,fontWeight:700,letterSpacing:1.5,textTransform:"uppercase",display:"block",marginBottom:7},
+  input:{background:"#08081e",border:"1px solid #1e1e48",borderRadius:10,color:"#e2e2ff",padding:"11px 14px",fontSize:14,outline:"none",fontFamily:"inherit",width:"100%",transition:"border-color .2s"},
+  textarea:{background:"#08081e",border:"1px solid #1e1e48",borderRadius:10,color:"#e2e2ff",padding:"11px 14px",fontSize:14,outline:"none",fontFamily:"inherit",width:"100%",resize:"vertical",lineHeight:1.6,transition:"border-color .2s"},
+  select:{background:"#08081e",border:"1px solid #1e1e48",borderRadius:10,color:"#e2e2ff",padding:"11px 14px",fontSize:14,outline:"none",fontFamily:"inherit",width:"100%",cursor:"pointer"},
+};
+
+// ── KOMPONEN ──
+function Field({label,children,hint}){
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <label style={S.label}>{label}</label>
+      {hint&&<span style={{color:"#3a3a70",fontSize:10}}>{hint}</span>}
+    </div>
+    {children}
+  </div>;
+}
+
+function Chip({active,onClick,children,color="#00e5a0",size="normal"}){
+  const pad=size==="sm"?"4px 10px":"6px 14px";
+  const fs=size==="sm"?11:12;
+  return <button onClick={onClick} style={{padding:pad,borderRadius:20,border:`1px solid ${active?color:"#1e1e48"}`,background:active?`${color}1a`:"transparent",color:active?color:"#4a4a80",fontSize:fs,cursor:"pointer",fontWeight:700,fontFamily:"inherit",transition:"all .2s"}}>{children}</button>;
+}
+
+function Toggle({value,onChange,color}){
+  return <div onClick={()=>onChange(!value)} style={{width:46,height:26,borderRadius:13,background:value?color:"#1a1a3e",position:"relative",transition:"background .3s",flexShrink:0,cursor:"pointer",boxShadow:value?`0 0 12px ${color}60`:""inset 0 1px 3px rgba(0,0,0,.5)""}}>
+    <div style={{width:20,height:20,borderRadius:"50%",background:"#fff",position:"absolute",top:3,left:value?23:3,transition:"left .3s",boxShadow:"0 1px 4px rgba(0,0,0,.4)"}}/>
+  </div>;
+}
+
+function ImageUploadProduk({value,onChange,color="#00e5a0"}){
+  const ref=useRef();
+  const handleFile=e=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{const b64=ev.target.result.split(",")[1];onChange({data:b64,type:file.type,preview:ev.target.result,name:file.name});};
+    reader.readAsDataURL(file);
+  };
+  return <div>
+    <input ref={ref} type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/>
+    {value
+      ?<div style={{display:"flex",alignItems:"center",gap:12,background:"#08081e",border:`1px solid ${color}40`,borderRadius:12,padding:"10px 14px"}}>
+        <img src={value.preview} alt="produk" style={{width:56,height:56,objectFit:"cover",borderRadius:10,border:`2px solid ${color}40`,boxShadow:`0 0 12px ${color}30`}}/>
+        <div style={{flex:1}}>
+          <div style={{color:"#e2e2ff",fontSize:12,fontWeight:700,marginBottom:3}}>{value.name}</div>
+          <div style={{color,fontSize:11}}>✅ Foto produk siap — AI akan kenali visual ini</div>
+        </div>
+        <button onClick={()=>onChange(null)} style={{background:"rgba(255,60,60,.12)",color:"#ff7070",border:"1px solid rgba(255,60,60,.25)",borderRadius:8,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Hapus</button>
+      </div>
+      :<button onClick={()=>ref.current.click()} style={{width:"100%",background:`${color}06`,border:`2px dashed ${color}30`,borderRadius:12,padding:"18px",color:`${color}cc`,fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:700,transition:"all .2s",display:"flex",flexDirection:"column",alignItems:"center",gap:6}}
+        onMouseEnter={e=>{e.currentTarget.style.background=`${color}10`;e.currentTarget.style.borderColor=`${color}50`;}}
+        onMouseLeave={e=>{e.currentTarget.style.background=`${color}06`;e.currentTarget.style.borderColor=`${color}30`;}}>
+        <span style={{fontSize:28}}>📷</span>
+        <span>Upload Foto Produk</span>
+        <span style={{fontSize:11,fontWeight:400,color:"#3a3a70"}}>Opsional — AI kenali visual untuk i2v prompt scene akhir</span>
+      </button>}
+  </div>;
+}
+
+function SoftSellBlock({form,setForm,color,topikKey}){
+  const set=k=>v=>setForm(f=>({...f,[k]:v}));
+  const handleToggle=val=>{
+    setForm(f=>{
+      const next={...f,softSelling:val};
+      if(val&&f[topikKey]){const s=detectProduk(f[topikKey]);if(s&&!f.deskripsiProduk){next.deskripsiProduk=s.deskripsi;next._namaProdukSaran=s.nama;}}
+      return next;
+    });
+  };
+  const isOn=form.softSelling;
+  return <div style={{background:"linear-gradient(135deg,#0f0f28,#0c0c22)",border:`1px solid ${isOn?color+"40":"#1e1e48"}`,borderRadius:16,padding:20,transition:"all .3s",boxShadow:isOn?`0 0 20px ${color}12`:""inset 0 1px 0 rgba(255,255,255,.03)""}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer"}} onClick={()=>handleToggle(!isOn)}>
+        <Toggle value={isOn} onChange={handleToggle} color={color}/>
+        <div>
+          <div style={{color:isOn?color:"#4a4a80",fontWeight:700,fontSize:14}}>🛒 Fitur Soft Selling</div>
+          <div style={{color:"#3a3a70",fontSize:11,marginTop:2}}>{isOn?"Produk disebut natural dalam edukasi":"Murni konten edukasi"}</div>
+        </div>
+      </div>
+      {isOn&&<span style={{background:`${color}15`,color,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>AKTIF</span>}
+    </div>
+    {isOn&&<div style={{marginTop:18,display:"flex",flexDirection:"column",gap:14,paddingTop:16,borderTop:`1px solid ${color}20`}}>
+      {form._namaProdukSaran&&<div style={{background:`${color}0e`,border:`1px solid ${color}25`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><span style={{color,fontSize:11,fontWeight:700}}>💡 Saran produk otomatis: </span><span style={{color:"#c0c0e0",fontSize:12,fontWeight:700}}>{form._namaProdukSaran}</span></div>
+        <button onClick={()=>setForm(f=>({...f,_namaProdukSaran:"",deskripsiProduk:""}))} style={{background:"transparent",border:"none",color:"#4a4a80",fontSize:14,cursor:"pointer"}}>✕</button>
+      </div>}
+      <Field label="📦 Nama & Deskripsi Produk">
+        <textarea style={S.textarea} value={form.deskripsiProduk} onChange={e=>set("deskripsiProduk")(e.target.value)} placeholder="Contoh: HerbalGluco Plus — suplemen ekstrak pare & kayu manis untuk menjaga kadar gula darah..." rows={2}/>
+      </Field>
+      <Field label="📷 Foto Produk" hint="Opsional">
+        <ImageUploadProduk value={form.fotoProduk} onChange={set("fotoProduk")} color={color}/>
+      </Field>
+      <div>
+        <label style={S.label}>🎬 Penempatan Produk di Scene Akhir</label>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+          {["Subjek memegang produk","Produk di atas meja","Close-up produk sinematik"].map(o=><Chip key={o} active={form.penempatanProduk===o} onClick={()=>set("penempatanProduk")(o)} color={color}>{o}</Chip>)}
+        </div>
+      </div>
+      <div>
+        <label style={S.label}>🎯 Porsi Narasi</label>
+        <div style={{display:"flex",alignItems:"center",gap:14,marginTop:6}}>
+          <span style={{color,fontSize:12,fontWeight:700,minWidth:100}}>{form.focusRatio}% Edukasi</span>
+          <input type="range" min={40} max={90} value={form.focusRatio} onChange={e=>set("focusRatio")(Number(e.target.value))} style={{accentColor:color,flex:1}}/>
+          <span style={{color:"#6080ff",fontSize:12,fontWeight:700,minWidth:90}}>{100-form.focusRatio}% Produk</span>
+        </div>
+        <div style={{height:4,borderRadius:2,marginTop:6,background:`linear-gradient(to right,${color} ${form.focusRatio}%,#6080ff ${form.focusRatio}%)`}}/>
+      </div>
+    </div>}
+  </div>;
+}
+
+// ── SCENE IMAGE CARD ──
+function SceneImageCard({prompt,rasio,sceneNum,accent}){
+  const [status,setStatus]=useState("loading");
+  const [seed]=useState(()=>Math.floor(Math.random()*99999));
+  const imgUrl=getImageUrl(prompt,rasio,seed);
+  const isPortrait=rasio==="9:16";
+  const imgW=isPortrait?150:240,imgH=isPortrait?240:150;
+  return(
+    <div className="fadein" style={{background:"#07071a",border:`1px solid ${accent}25`,borderRadius:12,overflow:"hidden",display:"flex",flexDirection:"column",width:imgW+2,flexShrink:0}}>
+      <div style={{padding:"6px 10px",background:`${accent}12`,borderBottom:`1px solid ${accent}15`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{color:accent,fontSize:10,fontWeight:800,letterSpacing:1}}>📸 Scene {sceneNum}</span>
+        {status==="ready"&&<button onClick={()=>window.open(imgUrl,"_blank")} title="Buka di tab baru" style={{background:"transparent",border:"none",color:accent,fontSize:11,cursor:"pointer",padding:0}}>⬇️</button>}
+      </div>
+      <div style={{position:"relative",width:imgW,height:imgH,flexShrink:0}}>
+        {status==="loading"&&<div className="shimmer" style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+          <div style={{width:24,height:24,border:`2px solid ${accent}40`,borderTop:`2px solid ${accent}`,borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+          <span style={{color:"#4040a0",fontSize:9,fontWeight:600}}>Generating...</span>
+        </div>}
+        {status==="error"&&<div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,background:"#0c0c22"}}>
+          <span style={{fontSize:20}}>🔄</span>
+          <button onClick={()=>setStatus("loading")} style={{background:`${accent}15`,color:accent,border:`1px solid ${accent}30`,borderRadius:6,padding:"3px 10px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>Coba Lagi</button>
+        </div>}
+        <img src={imgUrl} alt={`Scene ${sceneNum}`} style={{width:"100%",height:"100%",objectFit:"cover",display:status==="ready"?"block":"none"}} onLoad={()=>setStatus("ready")} onError={()=>setStatus("error")}/>
+      </div>
+      <div style={{padding:"5px 10px",borderTop:`1px solid ${accent}10`}}>
+        <div style={{color:"#2a2a60",fontSize:9,lineHeight:1.4}}>
+          {status==="ready"?"✅ Siap untuk I2V":status==="error"?"⚠️ Gagal load":"⏳ Memuat..."}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── RESULT PANEL ──
+function ResultPanel({result,mode,rasio}){
+  const [tab,setTab]=useState("prompts");
+  const [copied,setCopied]=useState(null);
+  const [showImgs,setShowImgs]=useState(true);
+  const parsed=parseResult(result);
+  const accent=mode==="eduhealth"?"#00e5a0":"#f5c518";
+  const copy=(txt,k)=>{navigator.clipboard.writeText(txt);setCopied(k);setTimeout(()=>setCopied(null),2500);};
+
+  const exportTxt=()=>{
+    if(!parsed)return;
+    let t=`=== MEDISCRIPT AI v3 ===\n\nJUDUL: ${parsed.judul}\nHOOK: ${parsed.hook||parsed.hook_teks}\n\n`;
+    parsed.scenes?.forEach(s=>{
+      t+=`--- Scene ${s.scene_number} (${s.durasi_detik}s) ---\n`;
+      t+=`Narasi: ${s.narasi||s.narasi_vo}\n`;
+      if(s.teks_overlay)t+=`Overlay: ${s.teks_overlay}\n`;
+      if(s.visual_description||s.visual_3d)t+=`Visual: ${s.visual_description||s.visual_3d}\n`;
+      t+=`I2V Prompt: ${s.i2v_prompt}\n\n`;
+    });
+    if(parsed.cta)t+=`CTA: ${parsed.cta}\n\n`;
+    if(parsed.pesan_inti)t+=`Pesan Inti: ${parsed.pesan_inti}\n\n`;
+    t+=`Caption:\n${parsed.caption}\n\nHashtag: ${parsed.hashtags?.join(" ")}`;
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([t],{type:"text/plain;charset=utf-8"}));
+    a.download=`mediscript_${Date.now()}.txt`;a.click();
+  };
+
+  const copyAll=()=>{
+    if(!parsed)return;
+    let t=`${parsed.judul}\n\n${parsed.hook||parsed.hook_teks}\n\n`;
+    parsed.scenes?.forEach(s=>t+=`Scene ${s.scene_number}: ${s.narasi||s.narasi_vo}\n`);
+    if(parsed.cta)t+=`\n${parsed.cta}`;
+    copy(t,"all");
+  };
+
+  if(!parsed)return(
+    <div style={{...S.card,marginTop:8}}>
+      <div style={{color:"#f5a020",fontSize:12,fontWeight:700,marginBottom:8}}>⚠️ Format tidak terbaca sebagai JSON</div>
+      <pre style={{color:"#6060a0",fontSize:11,lineHeight:1.6,whiteSpace:"pre-wrap",maxHeight:300,overflow:"auto"}}>{result}</pre>
+    </div>
+  );
+
+  const scenes=parsed.scenes||[];
+  const tabs=[
+    {k:"prompts",label:"🎨 Foto & Prompt"},
+    {k:"script",label:"📋 Naskah"},
+    {k:"scenes",label:"🎬 Scene"},
+    {k:"caption",label:"📱 Caption"},
+  ];
+
+  return(
+    <div className="fadein" style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Header */}
+      <div style={{background:`linear-gradient(135deg,${accent}10,#4080ff0e)`,border:`1px solid ${accent}35`,borderRadius:16,padding:"16px 20px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+          <div>
+            <div style={{color:accent,fontSize:10,fontWeight:800,letterSpacing:2,marginBottom:6}}>✅ SCRIPT SELESAI — MEDISCRIPT AI v3</div>
+            <div style={{color:"#e2e2ff",fontWeight:800,fontSize:16,marginBottom:4}}>{parsed.judul}</div>
+            <div style={{color:"#4a4a80",fontSize:12}}>{scenes.length} scene · {mode==="eduhealth"?"Edu Health Viral":"Object Talk"} · {rasio}</div>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button onClick={copyAll} style={{background:copied==="all"?accent:`${accent}15`,color:copied==="all"?"#000":accent,border:`1px solid ${accent}40`,borderRadius:10,padding:"8px 14px",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",transition:"all .2s"}}>
+              {copied==="all"?"✓ Tersalin!":"📋 Salin Semua"}
+            </button>
+            <button onClick={()=>setShowImgs(s=>!s)} style={{background:"#1a1a3e",color:"#8080b0",border:"1px solid #2a2a5a",borderRadius:10,padding:"8px 14px",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>
+              {showImgs?"🙈 Sembunyikan Foto":"📸 Tampilkan Foto"}
+            </button>
+            <button onClick={exportTxt} style={{background:accent,color:"#050510",border:"none",borderRadius:10,padding:"8px 16px",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>⬇️ Export</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tab Navigation */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",background:"#0a0a1e",padding:6,borderRadius:12,border:"1px solid #1a1a3a"}}>
+        {tabs.map(t=>(
+          <button key={t.k} onClick={()=>setTab(t.k)} style={{padding:"8px 16px",borderRadius:8,border:"none",background:tab===t.k?`${accent}20`:"transparent",color:tab===t.k?accent:"#4a4a80",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .2s",flex:1}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* TAB: FOTO + PROMPTS */}
+      {tab==="prompts"&&<div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{background:"rgba(64,128,255,.07)",border:"1px solid rgba(64,128,255,.18)",borderRadius:12,padding:"12px 16px",display:"flex",gap:10,alignItems:"flex-start"}}>
+          <span style={{fontSize:18}}>🎨</span>
+          <div style={{fontSize:12,color:"#5060b0",lineHeight:1.6}}>
+            <strong style={{color:"#7080d0"}}>Foto otomatis per scene (Pollinations AI — Gratis)</strong><br/>
+            Gunakan sebagai referensi visual, input I2V ke Kling AI/Runway/Pika, atau storyboard konten.
+          </div>
+        </div>
+        {scenes.map(s=>(
+          <div key={s.scene_number} style={{...S.card,borderLeft:`3px solid ${accent}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{background:`${accent}1a`,color:accent,borderRadius:20,padding:"4px 14px",fontSize:12,fontWeight:800}}>SCENE {s.scene_number}</span>
+                <span style={{color:"#3a3a70",fontSize:11}}>⏱ {s.durasi_detik}s</span>
+              </div>
+              <button onClick={()=>copy(s.i2v_prompt,`p${s.scene_number}`)} style={{background:copied===`p${s.scene_number}`?accent:"transparent",color:copied===`p${s.scene_number}`?"#000":"#4a4a80",border:"1px solid #2a2a5a",borderRadius:8,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700,transition:"all .2s"}}>
+                {copied===`p${s.scene_number}`?"✓ Tersalin!":"📋 Copy Prompt"}
+              </button>
+            </div>
+            {s.teks_overlay&&(
+              <div style={{background:"#f5c51810",border:"1px solid #f5c51830",borderRadius:8,padding:"8px 14px",fontWeight:800,fontSize:13,textAlign:"center",marginBottom:12,color:"#f5c518",fontFamily:"Georgia,serif"}}>
+                "{s.teks_overlay}"
+              </div>
+            )}
+            <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
+              {showImgs&&<SceneImageCard prompt={s.i2v_prompt} rasio={rasio||"9:16"} sceneNum={s.scene_number} accent={accent}/>}
+              <div style={{flex:1,display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{background:"#0a0a1e",borderRadius:10,padding:"10px 14px"}}>
+                  <div style={{color:"#3a3a70",fontSize:10,fontWeight:700,marginBottom:5}}>🎤 NARASI</div>
+                  <div style={{color:"#c0c0e0",fontSize:13,lineHeight:1.7}}>{s.narasi||s.narasi_vo}</div>
+                </div>
+                <div style={{background:"#07071a",borderRadius:10,padding:"10px 14px",border:"1px solid #181838"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                    <div style={{color:"#6070d0",fontSize:10,fontWeight:700}}>🤖 I2V / T2I PROMPT</div>
+                    <div style={{display:"flex",gap:4}}>
+                      {["Kling AI","Runway","Pika","Hailuo"].map(t=><span key={t} style={{color:"#2a2a60",fontSize:9,background:"#181838",borderRadius:4,padding:"2px 6px"}}>{t}</span>)}
+                    </div>
+                  </div>
+                  <div style={{color:"#7070a0",fontSize:12,lineHeight:1.6,fontFamily:"monospace"}}>{s.i2v_prompt}</div>
+                </div>
+                {(s.visual_description||s.visual_3d)&&(
+                  <div style={{background:"#0a0a1e",borderRadius:10,padding:"8px 12px"}}>
+                    <div style={{color:"#3a3a70",fontSize:10,fontWeight:700,marginBottom:4}}>🎨 DESKRIPSI VISUAL</div>
+                    <div style={{color:"#6060a0",fontSize:12,lineHeight:1.5}}>{s.visual_description||s.visual_3d}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+        <div style={{background:"rgba(0,229,160,.04)",border:"1px solid rgba(0,229,160,.12)",borderRadius:10,padding:"10px 14px",color:"#2a4a60",fontSize:11,lineHeight:1.7}}>
+          💡 <strong style={{color:"#3a6a80"}}>Tips:</strong> Buka gambar di tab baru → Save → Upload ke Kling AI sebagai "Image to Video" untuk hasil video yang presisi sesuai storyboard.
+        </div>
+      </div>}
+
+      {/* TAB: NASKAH */}
+      {tab==="script"&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={S.card}>
+          <div style={{color:accent,fontSize:11,fontWeight:700,marginBottom:8,letterSpacing:1}}>🪝 HOOK PEMBUKA</div>
+          <div style={{color:"#e2e2ff",fontSize:15,fontStyle:"italic",lineHeight:1.8,padding:"10px 14px",background:"#07071a",borderRadius:10,borderLeft:`3px solid ${accent}`}}>"{parsed.hook||parsed.hook_teks}"</div>
+        </div>
+        <div style={S.card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{color:accent,fontSize:11,fontWeight:700,letterSpacing:1}}>📖 NASKAH LENGKAP</div>
+            <button onClick={copyAll} style={{background:`${accent}15`,color:accent,border:`1px solid ${accent}30`,borderRadius:8,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
+              {copied==="all"?"✓ Tersalin!":"📋 Salin Semua"}
+            </button>
+          </div>
+          {scenes.map((s,i)=>(
+            <div key={s.scene_number} style={{marginBottom:14,paddingBottom:14,borderBottom:i<scenes.length-1?"1px solid #14143a":"none"}}>
+              <div style={{color:accent,fontSize:10,fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
+                <span style={{background:`${accent}15`,borderRadius:20,padding:"2px 10px"}}>SCENE {s.scene_number}</span>
+                <span style={{color:"#3a3a70"}}>⏱ {s.durasi_detik}s</span>
+              </div>
+              <div style={{color:"#c0c0e0",lineHeight:1.8,fontSize:14}}>{s.narasi||s.narasi_vo}</div>
+            </div>
+          ))}
+        </div>
+        {parsed.cta&&<div style={{...S.card,borderLeft:`3px solid ${accent}`}}>
+          <div style={{color:accent,fontSize:11,fontWeight:700,marginBottom:6,letterSpacing:1}}>📣 CALL TO ACTION</div>
+          <div style={{color:"#e2e2ff",fontSize:14,lineHeight:1.7}}>{parsed.cta}</div>
+        </div>}
+        {parsed.pesan_inti&&<div style={{...S.card,borderLeft:`3px solid ${accent}`}}>
+          <div style={{color:accent,fontSize:11,fontWeight:700,marginBottom:6,letterSpacing:1}}>💡 PESAN INTI</div>
+          <div style={{color:"#e2e2ff",fontSize:14,lineHeight:1.7}}>{parsed.pesan_inti}</div>
+        </div>}
+      </div>}
+
+      {/* TAB: SCENE */}
+      {tab==="scenes"&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {scenes.map(s=>(
+          <div key={s.scene_number} style={{...S.card,borderLeft:`3px solid ${accent}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
+              <span style={{background:`${accent}1a`,color:accent,borderRadius:20,padding:"3px 12px",fontSize:11,fontWeight:800}}>SCENE {s.scene_number}</span>
+              <span style={{color:"#3a3a70",fontSize:11}}>⏱ {s.durasi_detik}s</span>
+            </div>
+            {s.teks_overlay&&<div style={{background:"#f5c51810",border:"1px solid #f5c51830",borderRadius:8,padding:"8px 14px",fontWeight:800,fontSize:13,textAlign:"center",marginBottom:12,color:"#f5c518"}}>"{s.teks_overlay}"</div>}
+            <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
+              {showImgs&&<SceneImageCard prompt={s.i2v_prompt} rasio={rasio||"9:16"} sceneNum={s.scene_number} accent={accent}/>}
+              <div style={{flex:1,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><div style={{color:"#3a3a70",fontSize:10,fontWeight:700,marginBottom:4}}>🎤 NARASI</div><div style={{color:"#b0b0d0",fontSize:12,lineHeight:1.6}}>{s.narasi||s.narasi_vo}</div></div>
+                <div><div style={{color:"#3a3a70",fontSize:10,fontWeight:700,marginBottom:4}}>🎨 VISUAL</div><div style={{color:"#8080a0",fontSize:12,lineHeight:1.5}}>{s.visual_description||s.visual_3d||"-"}</div></div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>}
+
+      {/* TAB: CAPTION */}
+      {tab==="caption"&&<div style={S.card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <span style={{color:accent,fontSize:11,fontWeight:700,letterSpacing:1}}>📝 CAPTION + HASHTAG</span>
+          <button onClick={()=>copy(`${parsed.caption}\n\n${parsed.hashtags?.join(" ")}`,"cap")} style={{background:copied==="cap"?accent:`${accent}15`,color:copied==="cap"?"#000":accent,border:`1px solid ${accent}30`,borderRadius:8,padding:"6px 14px",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
+            {copied==="cap"?"✓ Tersalin!":"📋 Salin Semua"}
+          </button>
+        </div>
+        <div style={{color:"#e2e2ff",lineHeight:1.9,whiteSpace:"pre-wrap",marginBottom:18,fontSize:14}}>{parsed.caption}</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {parsed.hashtags?.map(h=><span key={h} style={{background:"rgba(64,128,255,.1)",color:"#7080c0",borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:600}}>{h}</span>)}
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+
+
+// ── EDU HEALTH FORM ──
+function EduHealthForm({apiKey}){
+  const [form,setForm]=useState({
+    namaPenyakit:"",tipeVisual:"Visual Edukasi Medis",lingkungan:"",
+    softSelling:false,deskripsiProduk:"",_namaProdukSaran:"",focusRatio:80,fotoProduk:null,penempatanProduk:"Subjek memegang produk",
+    konteksTambahan:"",targetAudiens:"General Public",nadaEdukasi:"Informative",
+    bahasa:"Indonesia ID",durasi:"30",narator:"Leda (Female, Calm)",platform:"TikTok",rasio:"9:16"
+  });
+  const [loading,setLoading]=useState(false);
+  const [stream,setStream]=useState("");
+  const [result,setResult]=useState(null);
+  const [err,setErr]=useState(null);
+  const set=k=>v=>setForm(f=>({...f,[k]:v}));
+  const handleTopik=v=>{
+    setForm(f=>{
+      const next={...f,namaPenyakit:v};
+      if(f.softSelling&&v){const s=detectProduk(v);if(s&&!f.deskripsiProduk){next.deskripsiProduk=s.deskripsi;next._namaProdukSaran=s.nama;}}
+      return next;
+    });
+  };
+  const go=async()=>{
+    if(!form.namaPenyakit.trim()){setErr("Masukkan nama penyakit/kondisi terlebih dahulu!");return;}
+    setLoading(true);setErr(null);setResult(null);setStream("");
+    try{const{system,user}=buildEduPrompt(form);setResult(await callGemini(apiKey,system,user,setStream));}
+    catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+  return <div style={{display:"flex",flexDirection:"column",gap:20}}>
+    <div style={{background:"rgba(0,229,160,.05)",border:"1px solid rgba(0,229,160,.18)",borderRadius:12,padding:"12px 16px"}}>
+      <div style={{color:"#00e5a0",fontWeight:700,fontSize:13}}>🩺 Edu Health Viral</div>
+      <div style={{color:"#3a3a70",fontSize:12,marginTop:3}}>Script edukasi medis profesional + foto visual otomatis tiap scene + soft selling</div>
+    </div>
+    <Field label="🏥 Nama Penyakit / Kondisi" hint="Wajib diisi">
+      <input style={S.input} value={form.namaPenyakit} onChange={e=>handleTopik(e.target.value)} placeholder="Contoh: Diabetes Melitus, Hipertensi, GERD, Karang Gigi, Asam Urat..."/>
+    </Field>
+    <div>
+      <label style={S.label}>🎬 Tipe Visual</label>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+        {["Visual Edukasi Medis","Interview Podcast","Storytelling"].map(o=><Chip key={o} active={form.tipeVisual===o} onClick={()=>set("tipeVisual")(o)}>{o}</Chip>)}
+      </div>
+    </div>
+    <Field label="🏛️ Lingkungan / Environment" hint="Opsional">
+      <input style={S.input} value={form.lingkungan} onChange={e=>set("lingkungan")(e.target.value)} placeholder="Studio medis, Taman, Kamar tidur, Ruang lab..."/>
+    </Field>
+    <SoftSellBlock form={form} setForm={setForm} color="#00e5a0" topikKey="namaPenyakit"/>
+    <Field label="📋 Konteks Tambahan" hint="Opsional">
+      <textarea style={S.textarea} value={form.konteksTambahan} onChange={e=>set("konteksTambahan")(e.target.value)} placeholder="Detail spesifik: gejala awal, pencegahan di rumah, 5W 1H, penyebab utama..." rows={3}/>
+    </Field>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+      <Field label="👥 Target Audiens">
+        <select style={S.select} value={form.targetAudiens} onChange={e=>set("targetAudiens")(e.target.value)}>
+          {["General Public","Ibu-Ibu","Pasien & Keluarga","Remaja","Lansia"].map(o=><option key={o}>{o}</option>)}
+        </select>
+      </Field>
+      <div>
+        <label style={S.label}>🎭 Nada Edukasi</label>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:4}}>
+          {["Informative","Empathetic","Urgent","Encouraging","Scientific","Casual"].map(o=><Chip key={o} size="sm" active={form.nadaEdukasi===o} onClick={()=>set("nadaEdukasi")(o)}>{o}</Chip>)}
+        </div>
+      </div>
+      <Field label="🌐 Bahasa">
+        <select style={S.select} value={form.bahasa} onChange={e=>set("bahasa")(e.target.value)}>
+          {["Indonesia ID","English","Melayu"].map(o=><option key={o}>{o}</option>)}
+        </select>
+      </Field>
+      <Field label="⏱️ Durasi">
+        <select style={S.select} value={form.durasi} onChange={e=>set("durasi")(e.target.value)}>
+          {["15","25","30","45","60"].map(o=><option key={o} value={o}>{o} detik</option>)}
+        </select>
+      </Field>
+      <Field label="📱 Platform">
+        <select style={S.select} value={form.platform} onChange={e=>set("platform")(e.target.value)}>
+          {["TikTok","Instagram Reels","YouTube Shorts","YouTube"].map(o=><option key={o}>{o}</option>)}
+        </select>
+      </Field>
+      <div>
+        <label style={S.label}>📐 Rasio Video</label>
+        <div style={{display:"flex",gap:8,marginTop:4}}>
+          <Chip active={form.rasio==="9:16"} onClick={()=>set("rasio")("9:16")}>📱 9:16 Vertikal</Chip>
+          <Chip active={form.rasio==="16:9"} onClick={()=>set("rasio")("16:9")}>🖥️ 16:9 Horizontal</Chip>
+        </div>
+      </div>
+      <Field label="🎙️ Narator">
+        <select style={S.select} value={form.narator} onChange={e=>set("narator")(e.target.value)}>
+          {["Leda (Female, Calm)","Zipper (Male, Energetic)","Aura (Female, Warm)","Titan (Male, Deep)"].map(o=><option key={o}>{o}</option>)}
+        </select>
+      </Field>
+    </div>
+    {err&&<div style={{background:"rgba(255,80,80,.08)",border:"1px solid rgba(255,80,80,.25)",borderRadius:10,padding:"10px 14px",color:"#ff8080",fontSize:13}}>⚠️ {err}</div>}
+    <button onClick={go} disabled={loading} style={{background:loading?"#0a1a0a":"linear-gradient(135deg,#00e5a0,#00b07a)",border:"none",borderRadius:14,padding:"16px 24px",color:loading?"#2a4a2a":"#050f0a",fontSize:15,fontWeight:900,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",transition:"all .2s",boxShadow:loading?"":"0 4px 24px rgba(0,229,160,.3)"}}>
+      {loading?"⚡ Sedang Generate Script...":"⚡ GENERATE SCRIPT SEKARANG"}
+    </button>
+    {loading&&stream&&<div style={S.card}>
+      <div style={{color:"#00e5a0",fontSize:11,fontWeight:700,marginBottom:6}}>🔄 Streaming dari Gemini AI...</div>
+      <div style={{color:"#3a3a70",fontSize:11,fontFamily:"monospace",maxHeight:80,overflow:"hidden"}}>{stream.slice(-300)}</div>
+    </div>}
+    {result&&!loading&&<ResultPanel result={result} mode="eduhealth" rasio={form.rasio}/>}
+  </div>;
+}
+
+// ── OBJECT TALK FORM ──
+function ObjectTalkForm({apiKey}){
+  const [form,setForm]=useState({
+    topik:"",hookStyle:"Provokatif",tipeVisual3D:"Animasi Otak 3D & Neuron",
+    nada:"Dramatis & Mengejutkan",bahasa:"Indonesia",warnaTeks:"Kuning Bold (#F5C518)",jumlahScene:"6",
+    softSelling:false,deskripsiProduk:"",_namaProdukSaran:"",focusRatio:80,fotoProduk:null,penempatanProduk:"Produk di atas meja",
+    rasio:"9:16",platform:"TikTok"
+  });
+  const [loading,setLoading]=useState(false);
+  const [stream,setStream]=useState("");
+  const [result,setResult]=useState(null);
+  const [err,setErr]=useState(null);
+  const set=k=>v=>setForm(f=>({...f,[k]:v}));
+  const go=async()=>{
+    if(!form.topik.trim()){setErr("Masukkan topik terlebih dahulu!");return;}
+    setLoading(true);setErr(null);setResult(null);setStream("");
+    try{const{system,user}=buildObjPrompt(form);setResult(await callGemini(apiKey,system,user,setStream));}
+    catch(e){setErr(e.message);}
+    setLoading(false);
+  };
+  return <div style={{display:"flex",flexDirection:"column",gap:20}}>
+    <div style={{background:"rgba(245,197,24,.05)",border:"1px solid rgba(245,197,24,.18)",borderRadius:12,padding:"12px 16px"}}>
+      <div style={{color:"#f5c518",fontWeight:700,fontSize:13}}>🧠 Object Talk — Gaya @brainhazards</div>
+      <div style={{color:"#3a3a70",fontSize:12,marginTop:3}}>Visual 3D sinematik dramatis + teks overlay + foto otomatis per scene</div>
+    </div>
+    <Field label="🧠 Topik / Fakta Kesehatan" hint="Wajib diisi">
+      <textarea style={S.textarea} value={form.topik} onChange={e=>set("topik")(e.target.value)} rows={3} placeholder="Contoh: Otakmu menjadi kotor setiap hari dan tidur adalah satu-satunya cara membersihkannya..."/>
+    </Field>
+    <div>
+      <label style={S.label}>🪝 Gaya Hook</label>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+        {["Provokatif","Pertanyaan Retoris","Fakta Mengejutkan"].map(o=><Chip key={o} active={form.hookStyle===o} onClick={()=>set("hookStyle")(o)} color="#f5c518">{o}</Chip>)}
+      </div>
+    </div>
+    <div>
+      <label style={S.label}>🎭 Nada</label>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+        {["Dramatis & Mengejutkan","Edukatif & Tenang","Dark & Mysterious"].map(o=><Chip key={o} active={form.nada===o} onClick={()=>set("nada")(o)} color="#f5c518">{o}</Chip>)}
+      </div>
+    </div>
+    <Field label="🎨 Tipe Visual 3D">
+      <select style={S.select} value={form.tipeVisual3D} onChange={e=>set("tipeVisual3D")(e.target.value)}>
+        {["Animasi Otak 3D & Neuron","Animasi Sel Darah & Pembuluh","Animasi Organ Internal","Animasi DNA & Molekul","Animasi Sistem Saraf","Animasi Tulang & Sendi"].map(o=><option key={o}>{o}</option>)}
+      </select>
+    </Field>
+    <SoftSellBlock form={form} setForm={setForm} color="#f5c518" topikKey="topik"/>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+      <Field label="🎨 Warna Teks Overlay">
+        <select style={S.select} value={form.warnaTeks} onChange={e=>set("warnaTeks")(e.target.value)}>
+          {["Kuning Bold (#F5C518)","Putih Bold (#FFFFFF)","Merah Bold (#FF4444)","Hijau Neon (#00FF80)"].map(o=><option key={o}>{o}</option>)}
+        </select>
+      </Field>
+      <Field label="🎬 Jumlah Scene">
+        <select style={S.select} value={form.jumlahScene} onChange={e=>set("jumlahScene")(e.target.value)}>
+          {["4","6","8","10"].map(o=><option key={o} value={o}>{o} Scene (~{o*3}s)</option>)}
+        </select>
+      </Field>
+      <Field label="🌐 Bahasa">
+        <select style={S.select} value={form.bahasa} onChange={e=>set("bahasa")(e.target.value)}>
+          {["Indonesia","English","Melayu"].map(o=><option key={o}>{o}</option>)}
+        </select>
+      </Field>
+      <Field label="📱 Platform">
+        <select style={S.select} value={form.platform} onChange={e=>set("platform")(e.target.value)}>
+          {["TikTok","Instagram Reels","YouTube Shorts","YouTube"].map(o=><option key={o}>{o}</option>)}
+        </select>
+      </Field>
+      <div style={{gridColumn:"1/-1"}}>
+        <label style={S.label}>📐 Rasio Video</label>
+        <div style={{display:"flex",gap:8,marginTop:4}}>
+          <Chip active={form.rasio==="9:16"} onClick={()=>set("rasio")("9:16")} color="#f5c518">📱 9:16 Vertikal</Chip>
+          <Chip active={form.rasio==="16:9"} onClick={()=>set("rasio")("16:9")} color="#f5c518">🖥️ 16:9 Horizontal</Chip>
+        </div>
+      </div>
+    </div>
+    {err&&<div style={{background:"rgba(255,80,80,.08)",border:"1px solid rgba(255,80,80,.25)",borderRadius:10,padding:"10px 14px",color:"#ff8080",fontSize:13}}>⚠️ {err}</div>}
+    <button onClick={go} disabled={loading} style={{background:loading?"#1a1200":"linear-gradient(135deg,#f5c518,#ff8c00)",border:"none",borderRadius:14,padding:"16px 24px",color:loading?"#4a3800":"#050300",fontSize:15,fontWeight:900,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",transition:"all .2s",boxShadow:loading?"":"0 4px 24px rgba(245,197,24,.3)"}}>
+      {loading?"🧠 Sedang Generate Script...":"🧠 GENERATE SCRIPT SEKARANG"}
+    </button>
+    {loading&&stream&&<div style={S.card}>
+      <div style={{color:"#f5c518",fontSize:11,fontWeight:700,marginBottom:6}}>🔄 Streaming dari Gemini AI...</div>
+      <div style={{color:"#3a3a70",fontSize:11,fontFamily:"monospace",maxHeight:80,overflow:"hidden"}}>{stream.slice(-300)}</div>
+    </div>}
+    {result&&!loading&&<ResultPanel result={result} mode="objecttalk" rasio={form.rasio}/>}
+  </div>;
+}
+
+// ── MAIN APP ──
+function App(){
+  const apiKey=HARDCODED_API_KEY;
+  const [mode,setMode]=useState(null);
+  const isEdu=mode==="eduhealth";
+
+  // Halaman Home
+  if(!mode)return(
+    <div style={{minHeight:"100vh",background:"#05050f"}}>
+      <div style={{maxWidth:880,margin:"0 auto",padding:"40px 20px 60px"}}>
+
+        {/* Hero */}
+        <div style={{textAlign:"center",marginBottom:52}}>
+          <div style={{display:"inline-block",marginBottom:18}}>
+            <div className="hero-gradient" style={{WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",fontSize:11,fontWeight:800,letterSpacing:3,padding:"4px 0"}}>
+              AI HEALTH CONTENT STUDIO v3
+            </div>
+          </div>
+          <h1 style={{fontSize:"clamp(36px,6vw,62px)",fontWeight:900,lineHeight:1.05,background:"linear-gradient(135deg,#ffffff 0%,#c0c0ff 35%,#00e5a0 65%,#4080ff 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginBottom:16}}>
+            MediScript AI
+          </h1>
+          <p style={{color:"#3a3a70",fontSize:15,maxWidth:520,margin:"0 auto",lineHeight:1.8}}>
+            Generate <strong style={{color:"#6060a0"}}>script video kesehatan viral</strong> + foto otomatis tiap scene — edukasi medis profesional & object talk sinematik
+          </p>
+        </div>
+
+
+        {/* Mode Cards */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:32}}>
+          {[
+            {key:"eduhealth",icon:"🩺",title:"Edu Health Viral",color:"#00e5a0",
+             desc:"Script edukasi medis profesional + foto visual otomatis tiap scene + soft selling produk.",
+             tags:["Foto Tiap Scene","Soft Selling","Upload Foto Produk","9:16 / 16:9"]},
+            {key:"objecttalk",icon:"🧠",title:"Object Talk",color:"#f5c518",
+             desc:"Gaya @brainhazards — 3D sinematik dramatis + foto referensi tiap scene otomatis.",
+             tags:["3D Cinematic","Teks Overlay","Upload Foto Produk","Viral Hook"]},
+          ].map(m=>(
+            <div key={m.key} onClick={()=>setMode(m.key)}
+              style={{background:"linear-gradient(135deg,#0f0f28,#0a0a1e)",border:`1px solid ${m.color}20`,borderRadius:20,padding:28,cursor:"pointer",transition:"all .3s",position:"relative",overflow:"hidden"}}
+              onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-5px)";e.currentTarget.style.borderColor=`${m.color}50`;e.currentTarget.style.boxShadow=`0 12px 40px ${m.color}18`;}}
+              onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor=`${m.color}20`;e.currentTarget.style.boxShadow="";}}>
+              <div style={{position:"absolute",top:-30,right:-30,width:120,height:120,borderRadius:"50%",background:`radial-gradient(circle,${m.color}12,transparent)`,pointerEvents:"none"}}/>
+              <div style={{fontSize:40,marginBottom:14}}>{m.icon}</div>
+              <h2 style={{color:m.color,fontSize:20,fontWeight:800,marginBottom:8}}>{m.title}</h2>
+              <p style={{color:"#3a3a70",fontSize:13,lineHeight:1.8,marginBottom:18}}>{m.desc}</p>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:20}}>
+                {m.tags.map(t=><span key={t} style={{background:`${m.color}10`,color:m.color,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>{t}</span>)}
+              </div>
+              <div style={{color:m.color,fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:6}}>
+                Mulai Generate <span style={{fontSize:16}}>→</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Fitur Grid */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:24}}>
+          {[
+            {i:"📸",l:"Foto Otomatis / Scene"},
+            {i:"🤖",l:"Gemini AI Gratis"},
+            {i:"🛒",l:"Soft Selling + Foto Produk"},
+            {i:"📱",l:"Multi Platform"},
+          ].map(({i,l})=>(
+            <div key={l} style={{background:"#0a0a1e",border:"1px solid #141438",borderRadius:12,padding:"14px 10px",textAlign:"center",transition:"all .2s"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="#2a2a60";}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor="#141438";}}>
+              <div style={{fontSize:22,marginBottom:7}}>{i}</div>
+              <div style={{color:"#2a2a60",fontSize:11,fontWeight:600,lineHeight:1.4}}>{l}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Saran Fitur Banner */}
+        <div style={{background:"linear-gradient(135deg,rgba(64,128,255,.06),rgba(160,64,255,.06))",border:"1px solid rgba(100,100,255,.15)",borderRadius:14,padding:"16px 20px"}}>
+          <div style={{color:"#7080c0",fontWeight:700,fontSize:13,marginBottom:10}}>✨ Fitur Baru di v3</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {[
+              "📷 Upload foto produk untuk soft selling",
+              "📋 Tombol Salin Semua naskah 1 klik",
+              "🎨 Desain baru lebih bersih & elegan",
+            ].map(f=><div key={f} style={{color:"#3a3a70",fontSize:12,padding:"6px 10px",background:"rgba(100,100,255,.04)",borderRadius:8}}>{f}</div>)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Halaman Form
+  return(
+    <div style={{minHeight:"100vh",background:"#05050f"}}>
+      <div style={{maxWidth:900,margin:"0 auto",padding:"0 20px 60px"}}>
+        {/* Header sticky */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 0",borderBottom:"1px solid #141438",marginBottom:28,position:"sticky",top:0,background:"#05050f",zIndex:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <button onClick={()=>setMode(null)} style={{background:"transparent",border:"1px solid #1e1e48",borderRadius:10,color:"#4a4a80",padding:"7px 14px",cursor:"pointer",fontSize:12,fontFamily:"inherit",transition:"all .2s"}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor="#3a3a6a"}
+              onMouseLeave={e=>e.currentTarget.style.borderColor="#1e1e48"}>← Beranda</button>
+            <span style={{color:"#e2e2ff",fontWeight:800,fontSize:15}}>{isEdu?"🩺 Edu Health Viral":"🧠 Object Talk"}</span>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setMode("eduhealth")} style={{background:isEdu?"rgba(0,229,160,.1)":"transparent",border:`1px solid ${isEdu?"#00e5a0":"#1e1e48"}`,borderRadius:10,color:isEdu?"#00e5a0":"#4a4a80",padding:"7px 14px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>Edu Health</button>
+            <button onClick={()=>setMode("objecttalk")} style={{background:!isEdu?"rgba(245,197,24,.1)":"transparent",border:`1px solid ${!isEdu?"#f5c518":"#1e1e48"}`,borderRadius:10,color:!isEdu?"#f5c518":"#4a4a80",padding:"7px 14px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>Object Talk</button>
+          </div>
+        </div>
+        {isEdu?<EduHealthForm apiKey={apiKey}/>:<ObjectTalkForm apiKey={apiKey}/>}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
